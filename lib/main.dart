@@ -1,15 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
 
-import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:sensorsiot/my_db.dart';
 import 'package:sensorsiot/sensor_data_model.dart';

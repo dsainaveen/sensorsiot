@@ -1,21 +1,29 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:sensorsiot/my_db.dart';
+import 'package:sensorsiot/sensor_data_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-StreamController<MagnetometerEvent> magnetometerStream =
-StreamController<MagnetometerEvent>.broadcast();
 
-StreamSubscription<MagnetometerEvent>? magnetometerEventData;
 
-void main() async{
+
+
+DataHelper dataHelper = DataHelper();
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeService();
+  await dataHelper.initDatabase();
   runApp(const MyApp());
 }
 
@@ -49,15 +57,16 @@ Future<void> initializeService() async {
 
 @pragma('vm:entry-point')
 Future<bool> onIosBackground(ServiceInstance service) async {
+  MagnetometerEvent? magnetometerEvent;
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
-
-  SharedPreferences preferences = await SharedPreferences.getInstance();
-  await preferences.reload();
-  final log = preferences.getStringList('log') ?? <String>[];
-  log.add(DateTime.now().toIso8601String());
-  await preferences.setStringList('log', log);
-
+  magnetometerEvents.listen((MagnetometerEvent event) {
+    magnetometerEvent = event;
+  });
+  Timer.periodic(const Duration(seconds: 5), (timer) async {
+    print('onIosBackground SERVICE: ${DateTime.now().toLocal().toString()}');
+    callStoreData(magnetometerEvent);
+  });
   return true;
 }
 
@@ -70,20 +79,10 @@ void onStart(ServiceInstance service) async {
   debugPrint('Service started!');
   // For flutter prior to version 3.0.0
   // We have to register the plugin manually
-  SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
-  int? excelCreated =  sharedPreferences.getInt('excelCreated');
-  if(excelCreated != null && excelCreated == 1) {
-    debugPrint('Excel already created');
-    var excel = Excel.createExcel();
-  }
-  SharedPreferences preferences = await SharedPreferences.getInstance();
-  await preferences.setString("hello", "world");
 
   magnetometerEvents.listen((MagnetometerEvent event) {
-    magnetometerStream.add(event);
     magnetometerEvent = event;
   });
-
 
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
@@ -101,25 +100,35 @@ void onStart(ServiceInstance service) async {
     debugPrint('stopService event received!');
     service.stopSelf();
   });
+  Timer.periodic(const Duration(seconds: 5), (timer) async {
+    callStoreData(magnetometerEvent);
+  });
+}
 
-  // bring to foreground
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
+void callStoreData(magnetometerEvent) async{
 
     /// you can see this log in logcat
-    print('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
-    print('MagnetometerEvent on start: X:${magnetometerEvent?.x}\nY:${magnetometerEvent?.y}\nZ:${magnetometerEvent?.z}');
+    print('FLUTTER BACKGROUND SERVICE: ${DateTime.now().toLocal().toString()}');
+    SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
+    bool writeData = sharedPreferences.getBool('writeToCSV') ?? false;
+    debugPrint('Writing data to excel: $writeData');
+    if (writeData) {
+      dataHelper.add(SensorData(
+          x: magnetometerEvent?.x.toInt().toString(),
+          y: magnetometerEvent?.y.toInt().toString(),
+          z: magnetometerEvent?.z.toInt().toString(),
+          dateTime: DateTime.now().toLocal().toString()));
+      Fluttertoast.showToast(
+        msg: "Storing data to DB",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.BOTTOM,
+        timeInSecForIosWeb: 1,
+        backgroundColor: Colors.black,
+        textColor: Colors.white,
+        fontSize: 16.0,
+      );
+    }
 
-    // test using external plugin
-
-
-    service.invoke(
-      'update',
-      {
-        "current_date": DateTime.now().toIso8601String(),
-        "device": "device details",
-      },
-    );
-  });
 }
 
 class MyApp extends StatelessWidget {
@@ -128,11 +137,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'NAVEEN SENSOR APP',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        primarySwatch: Colors.deepPurple,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(title: 'NAVEEN SENSOR APP'),
     );
   }
 }
@@ -148,17 +157,13 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   ///UI Display
-  MagnetometerEvent? magnetometerEventUI;
-
+  AccelerometerEvent? magnetometerEventUI;
+  final service = FlutterBackgroundService();
+  bool serviceIsRunning = false;
+  List<SensorData>? sensorData = [];
   @override
   void initState() {
-    final service = FlutterBackgroundService();
-    service.isRunning().then((isRunning) {
-      if (isRunning) {
-        debugPrint('FlutterBackgroundService is running');
-        startListening();
-      }
-    });
+    checkForService();
     super.initState();
   }
 
@@ -167,31 +172,46 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
-  void stopListening() {
-    debugPrint('stopListening');
-    magnetometerEventData?.pause();
-    setState(() {});
-  }
-
-  void resumeListening() {
-    debugPrint('resumeListening');
-    magnetometerEventData?.resume();
-    setState(() {});
-  }
-
-  void startListening() {
-    debugPrint('startListening');
-    final service = FlutterBackgroundService();
-    service.startService();
-    magnetometerEvents.listen((MagnetometerEvent event) {
-      magnetometerStream.add(event);
-      debugPrint('startListening data: ${event.x} ${event.y} ${event.z} ==== ${magnetometerStream.stream}');
+  void checkForService() async {
+    SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
+    bool writeData = sharedPreferences.getBool('writeToCSV') ?? false;
+    if (writeData) {
+      startListening();
+      serviceIsRunning = true;
+    } else {
+      stopListening();
+      serviceIsRunning = false;
+    }
+    Timer.periodic(const Duration(seconds: 3), (timer) async {
+      getDbData();
     });
-    magnetometerEventData = magnetometerStream.stream.listen((event) {
-      debugPrint('magnetometerEvent stream listen: $event');
-      setState(() {
-        magnetometerEventUI = event;
-      });
+  }
+
+  void stopListening() async {
+    debugPrint('stopListening');
+    SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
+    sharedPreferences.setBool('writeToCSV', false);
+    service.invoke('stopService');
+    setState(() {
+      serviceIsRunning = false;
+    });
+  }
+
+  void startListening() async {
+    service.startService();
+    debugPrint('startListening');
+    SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
+    sharedPreferences.setBool('writeToCSV', true);
+    setState(() {
+      serviceIsRunning = true;
+    });
+  }
+
+  void getDbData() async {
+    sensorData = await dataHelper.getItems();
+    debugPrint('sensorData: $sensorData');
+    setState(() {
+
     });
   }
 
@@ -199,53 +219,53 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Row(
-              children: [
-                const Text(
-                  'Magnetometer Sensor Data:',
-                ),
-                magnetometerStream.isPaused || magnetometerStream.isClosed
-                    ? const Text('start listening')
-                    : Text(
-                        'x:${magnetometerEventUI?.x.toInt()} y:${magnetometerEventUI?.y.toInt()} z:${magnetometerEventUI?.z.toInt()}',
-                      ),
-              ],
+        title: Column(
+          children: [
+            Text(widget.title),
+            const Text(
+              'Magnetometer Sensor Data:',
             ),
           ],
         ),
       ),
-      floatingActionButton: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          magnetometerStream.hasListener
-              ? Container()
-              : FloatingActionButton(
-                  onPressed: startListening,
-                  child: const Icon(Icons.play_arrow),
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: ListView.builder(
+                  itemCount: sensorData?.length,
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      title: Text(
+                          "${index + 1}. x:${sensorData?[index].x}, y:${sensorData?[index].y}, z:${sensorData?[index].z}, dateTime:${sensorData?[index].dateTime}"),
+                    );
+                  },
                 ),
-          const SizedBox(
-            width: 10,
+              ),
+              serviceIsRunning
+                  ? ElevatedButton(
+                      onPressed: () {
+                        stopListening();
+                      },
+                      child: const Text('Stop Listening'))
+                  : ElevatedButton(
+                      onPressed: () {
+                        startListening();
+                      },
+                      child: Text('Start Listening'))
+            ],
           ),
-          magnetometerEventData != null
-              ? (magnetometerEventData!.isPaused
-                  ? FloatingActionButton(
-                      onPressed: resumeListening,
-                      child: const Icon(Icons.play_arrow),
-                    )
-                  : FloatingActionButton(
-                      onPressed: stopListening,
-                      child: const Icon(Icons.stop),
-                    ))
-              : Container(),
-        ],
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+         dataHelper.convertToCSV();
+        },
+        tooltip: 'Send Data',
+        child: const Icon(Icons.send),
+      )
     );
   }
 }

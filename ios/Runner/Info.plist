@@ -18,6 +18,14 @@
     <array>
         <string>_dartobservatory._tcp</string>
     </array>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>App wants to access your documents folder</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>App wants to access your downloads folder</string>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>UIFileSharingEnabled</key>
+    <true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

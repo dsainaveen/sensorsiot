@@ -40,6 +40,11 @@ dependencies:
   shared_preferences:
   fluttertoast:
   excel:
+  path_provider: ^2.0.14
+  permission_handler:
+  sqflite:
+  csv:
+  share_plus:
 
 dev_dependencies:
   flutter_test:

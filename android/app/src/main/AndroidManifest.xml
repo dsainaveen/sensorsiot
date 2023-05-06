@@ -3,6 +3,8 @@
     package="com.sensors.iot.sensorsiot">
 
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
    <application
         tools:replace="android:label"
         android:label="sensorsiot"
